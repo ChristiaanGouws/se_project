@@ -1,0 +1,20 @@
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+*.class
+# Virtual environments
+.venv/
+venv/
+env/
+# Editor / IDE settings
+.vscode/
+.idea/
+# Sensitive data / API credentials
+*.env
+*.token
+# OS generated
+Thumbs.db
+Desktop.ini
+.DS_Store
+# Large video files (Optional: uncomment if you don't want the 28MB demo video on Git)
+# *.mp4

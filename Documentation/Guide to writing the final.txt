@@ -1,0 +1,251 @@
+================================================================================
+CHAPTER 9: CONSTRUCTION & TESTING — WRITING GUIDE & EXAMPLES
+Project: ByteFlow: A Comparative Platform for Classical and Quantum Max-Cut Solutions
+================================================================================
+
+OVERVIEW OF RUBRIC REQUIREMENTS (STEPS 6 & 7):
+- Document the hardware and software tools (IDE, languages, frameworks, libraries)
+  used to implement the design, contrasting them with the Section 7 Figma prototype.
+- Explain how the architectural and class designs (Section 5) were translated into
+  working modules and interfaces.
+- Select and justify ONE testing strategy (from Pressman Chapter 22, e.g., Unit
+  Testing, Integration Testing, or Validation/Black-Box Testing) to verify
+  functional/non-functional requirements and uncover bugs.
+- Provide a structured Test Cases & Results table mapped to your Use Cases (UC1–UC5)
+  and document actual bugs discovered and fixed during testing.
+- Provide clear Deployment & Installation steps for setting up and running ByteFlow.
+
+--------------------------------------------------------------------------------
+9.1 IMPLEMENTATION ENVIRONMENT (HARDWARE & SOFTWARE TOOLS)
+--------------------------------------------------------------------------------
+
+[HOW TO WRITE THIS SECTION]
+1. Contrast with Section 7 (Prototype):
+   - Remind the reader that Section 7 used a static, throwaway Figma prototype with
+     zero backend logic, whereas Section 9 describes the functional production stack.
+2. Specify the Hardware Environment:
+   - Detail the local development/client hardware (CPU, RAM, OS used for local IDE
+     execution, classical SDP solving, and Qiskit Aer local simulation).
+   - Detail the remote execution hardware (IBM Quantum Cloud QPUs accessed via
+     Qiskit Runtime sessions, such as 127-qubit Eagle-processor backends, alongside
+     local fallback simulation when queues time out).
+3. Specify the Software & Development Tools:
+   - IDE & Version Control: VS Code / Antigravity IDE, Git, and GitHub (referencing
+     the feature-branch workflow from Section 8.3).
+   - Programming Language & Runtime: Python 3.10+.
+   - Quantum Stack: `qiskit` (circuit construction, Ising Hamiltonian mapping,
+     transpilation), `qiskit-ibm-runtime` (remote QPU session management and
+     SamplerV2/EstimatorV2 execution), and `qiskit-aer` (local quantum simulation
+     for the UC3 fallback mechanism).
+   - Classical & Scientific Stack: `numpy`, `scipy`, `cvxpy` / `networkx` (for
+     graph adjacency representation and Goemans-Williamson Semidefinite Programming
+     (SDP) relaxation).
+   - UI & Visualization Stack: Detail the UI framework and plotting tools (`byteflow/ui`
+     modules: `app.py`, `setup_panel.py`, `status_bar.py`, `log_panel.py`, Matplotlib /
+     web interface components) and testing framework (`pytest` / `unittest`).
+
+[EXAMPLE FOR SECTION 9.1]
+While the throwaway prototype in Section 7 relied exclusively on Figma to produce static wireframes of the five workflow stages (Experiment, Connection, Execution, Fallback, and Analytics), the construction phase transitioned ByteFlow into a fully functional Python software system.
+
+Hardware Environment:
+Development and local execution were conducted on standard consumer workstations (64-bit Windows 11 / Ubuntu Linux environments equipped with multi-core x86_64 processors and 16 GB RAM). This local hardware executes the user interface, runs the classical Goemans-Williamson Semidefinite Programming (SDP) solver, and hosts the local Qiskit Aer statevector/shot simulator when offline execution or fallback handling (UC3) is triggered. For remote quantum execution (UC2), the system dispatches transpiled Quantum Approximate Optimisation Algorithm (QAOA) circuits to IBM Quantum Cloud superconducting Quantum Processing Units (QPUs) via Qiskit Runtime cloud sessions.
+
+Software Tools & Implementation Stack:
+- Integrated Development Environment (IDE) & Version Control: Development was carried out using Visual Studio Code (with Python and Pylance extensions), coordinated through Git and a shared GitHub repository using short-lived feature branches and pull-request reviews.
+- Core Language & Scientific Libraries: Python 3.11 served as the core implementation language. Graph topologies and adjacency matrices were managed using `NetworkX` and `NumPy`, while the classical Max-Cut SDP relaxation and optimisation baseline (UC1) were implemented using `CVXPY` and `SciPy`.
+- Quantum SDK & Fallback Simulation: Quantum circuit generation, Ising Spin Hamiltonian mapping, and hardware transpilation were implemented using the `Qiskit` SDK (v1.x). Remote hardware communication was implemented via `qiskit-ibm-runtime`, while the automated local fallback simulator (UC3) was built on `qiskit-aer`.
+- User Interface & Visualisation: The modular interface (`byteflow/ui/`, comprising `app.py`, `setup_panel.py`, `status_bar.py`, and `log_panel.py`) and comparative visualisations (`Matplotlib`) render the interactive graph workspace, real-time execution logs, partition layouts, and side-by-side benchmarking charts.
+- Testing Framework: Automated test suites were written and executed using Python's `unittest` and `pytest` frameworks.
+
+
+--------------------------------------------------------------------------------
+9.2 CODE DESCRIPTION & CORE MODULES
+--------------------------------------------------------------------------------
+
+[HOW TO WRITE THIS SECTION]
+1. Map Design Classes (Section 5.3) to Actual Code Modules:
+   - Explicitly reference the four core classes from Section 5.3 (`GraphWorkspace`,
+     `ClassicalSolver`, `QiskitQAOASolver`, and `FallbackManager`) and explain how
+     each was implemented in Python.
+2. Explain Data Flow & UI-to-Backend Communication (Section 5.4 & 5.5):
+   - Describe how user actions in the UI (`setup_panel.py`, `app.py`) pass graph
+     selections, layer depth `p`, and API credentials to the backend controller/API
+     endpoints (`/api/solve/classical` and `/api/solve/quantum` or controller
+     dispatch methods).
+   - Reference Algorithm 1 from Section 5.5 (`executeQuantumQAOA`) and explain how
+     the `try/except` timeout and authentication error handling triggers the local
+     `AerSimulator` and attaches the `"IBM QPU"` or `"Local Sim"` provenance label.
+   - Explain how the Comparative Analytics view aggregates both execution artefacts
+     to compute approximation ratios, wall-clock runtimes, and shot distributions.
+
+[EXAMPLE FOR SECTION 9.2]
+The software architecture and class specifications defined in Section 5 were implemented as decoupled Python packages separating the user interface (`byteflow/ui/`), domain models, and solver execution engines:
+
+1. GraphWorkspace Module (Predefined Graph & Matrix Management):
+   Translating the `GraphWorkspace` class from Section 5.3, this module manages predefined classroom-scale Max-Cut topologies (e.g., 4-node cycle, 5-node bull graph, and 6-node Petersen/complete subgraphs). It constructs the weighted adjacency matrix $W$ and provides helper methods to compute exact cut weights for any binary vertex partition $z \in \{-1, +1\}^n$.
+
+2. ClassicalSolver Module (UC1 — Goemans-Williamson SDP Baseline):
+   Implementing `ClassicalSolver`, this module accepts the active graph's adjacency matrix from `GraphWorkspace`, formulates the Semidefinite Programming relaxation using `CVXPY`, and performs random hyperplane rounding to extract the binary partition. It records the wall-clock execution time via `time.perf_counter()`, optimal cut value, and node partition layout into an `ExecutionResult` data structure tagged with classical provenance.
+
+3. QiskitQAOASolver Module (UC2 — Quantum Execution Engine):
+   Implementing `QiskitQAOASolver`, this class maps the graph's adjacency matrix into a Pauli-$Z$ Ising Spin Hamiltonian ($H_C = \frac{1}{2}\sum_{(i,j)\in E} w_{ij}(I - Z_i Z_j)$) and constructs a parameterised QAOA circuit ansatz of user-configured layer depth $p$. A classical optimiser (`COBYLA` via `SciPy`) iteratively updates the variational parameters $(\gamma, \beta)$ to minimise expectation energy before sampling the final measurement shot distribution.
+
+4. FallbackManager & Controller Orchestration (UC3, UC4, UC5):
+   Implementing Algorithm 1 from Section 5.5, `FallbackManager` wraps remote `qiskit-ibm-runtime` execution inside a monitored session block with a configurable queue time-to-live (`TIMEOUT_LIMIT`). After `Configuration & Security` (UC4) validates the user's API token, the frontend dispatches solve requests (via the `/api/solve/classical` and `/api/solve/quantum` controller handlers). If the IBM Quantum session raises an `IBMRuntimeError`, authentication failure, or exceeds the queue timeout threshold, `FallbackManager` catches the exception, logs a provenance warning to `log_panel.py` and `status_bar.py`, and transparently reroutes the transpiled QAOA circuit to `AerSimulator()`. The resulting metrics—tagged as either `"IBM QPU"` or `"Local Sim"`—are returned to the UI dashboard to render side-by-side partition graphs, approximation ratios, and runtime comparisons (UC5).
+
+
+--------------------------------------------------------------------------------
+9.3 TESTING STRATEGY & TEST CASES
+--------------------------------------------------------------------------------
+
+9.3.1 SELECTED TESTING STRATEGY
+-------------------------------
+
+[HOW TO WRITE THIS SECTION]
+1. Follow the Rubric Rule Strictly:
+   - The assignment instructions state: "There are many testing strategies available
+     to choose from – see Chapter 22 – only select one testing strategy."
+   - State ONE clear strategy (e.g., **Unit Testing** or **Integration Testing** or
+     **Validation / Black-Box Testing**). Note: Since Section 8.2 and your codebase
+     (`tests/test_ui_refactor.py`) emphasise automated **Unit & Component Testing**
+     (or **Black-Box Validation Testing** mapped to requirements UC1–UC5), pick ONE
+     primary strategy and state it unambiguously.
+2. Justify Why This Strategy Fits ByteFlow:
+   - Explain why this single strategy is ideal for a hybrid classical-quantum
+     application:
+     * If choosing **Unit Testing (White-Box Component Testing)**: It allows
+       isolated verification of deterministic mathematical modules (`ClassicalSolver`
+       SDP cut calculations, Ising Hamiltonian construction, `FallbackManager`
+       timeout switching, and UI state components in `tests/test_ui_refactor.py`)
+       using mock objects without consuming expensive IBM Quantum QPU quota or waiting
+       in live cloud queues.
+     * If choosing **Validation Testing (Black-Box Requirements Testing)**: It
+       directly exercises each functional requirement and use case (UC1–UC5) against
+       expected inputs and outputs to prove user requirements are met.
+   (Below we provide an example using **Unit Testing** as promised in Section 8.2/8.3,
+   while mapping each unit test directly to UC1–UC5 so it satisfies the table
+   requirements in 9.3.2!)
+
+[EXAMPLE FOR SECTION 9.3.1]
+For ByteFlow, we selected **Unit Testing** as our single formal testing strategy (aligned with Pressman Chapter 22 and our quality plan in Section 8.2). Unit testing focuses verification effort on the smallest testable software components—individual classes, mathematical functions, and UI state modules—in isolation before full system execution.
+
+Justification for Selecting Unit Testing:
+1. Decoupling from Unpredictable Cloud Queues: Because ByteFlow interacts with external IBM Quantum Cloud hardware subject to long queue times and rate limits, testing the system primarily through live end-to-end cloud runs would be slow, non-deterministic, and costly. Unit testing with mocked runtime exceptions allows deterministic verification of the `FallbackManager` (UC3) and token validator (UC4) in milliseconds.
+2. Mathematical Correctness of Core Solvers: Both the classical SDP solver (UC1) and the graph-to-Ising Hamiltonian circuit builder (UC2) rely on strict linear-algebraic invariants (e.g., cut values on known benchmark graphs and matching qubit/edge counts). Unit testing verifies these mathematical outputs against known analytical baselines prior to visual rendering.
+3. Preventing Regressions Across Parallel Development: Using automated `pytest`/`unittest` suites (including `tests/test_ui_refactor.py`) allowed team members working concurrently on the UI panels (`setup_panel.py`, `status_bar.py`, `log_panel.py`) and backend solvers to verify that interface refactors did not break solver state transitions.
+
+
+9.3.2 TEST CASES & RESULTS
+--------------------------
+
+[HOW TO WRITE THIS SECTION]
+1. Include a Comprehensive Table:
+   - Must contain the exact columns requested in the outline:
+     `Test ID` | `Requirement / Use Case` | `Input` | `Expected Output` | `Actual Output` | `Status (Pass/Fail)`
+   - Cover all 5 Use Cases (UC1, UC2, UC3, UC4, UC5) plus boundary/negative cases
+     (e.g., invalid API token, timeout fallback trigger, UI state update).
+2. Discuss Bugs Uncovered and Fixed:
+   - The prompt explicitly asks for "plus any bugs uncovered and fixed".
+   - Describe 2–3 realistic bugs discovered during testing (e.g., Qiskit bitstring
+     little-endian ordering mismatch in Max-Cut partition mapping, UI thread freezing
+     or status bar state desync during fallback transitions, or ungraceful crash on
+     empty/invalid IBM API tokens) and explain how the team fixed them and re-ran
+     the tests to achieve a `PASS`.
+
+[EXAMPLE FOR SECTION 9.3.2]
+Table 7 summarises the automated unit test cases executed across ByteFlow's core solver, fallback, configuration, and UI modules.
+
+Table 7: ByteFlow Test Cases and Execution Results
++---------+------------------------+-----------------------------------+----------------------------------------+----------------------------------------+--------+
+| Test ID | Requirement / Use Case | Input                             | Expected Output                        | Actual Output                          | Status |
++---------+------------------------+-----------------------------------+----------------------------------------+----------------------------------------+--------+
+| TC-01   | UC1: Classical Solver  | Predefined 4-node cycle graph     | Returns optimal Max-Cut value = 4.0,   | Optimal cut = 4.0, partition [0,1,0,1],| PASS   |
+|         | (`ClassicalSolver`)    | ($C_4$), unweighted edges         | alternating partition `[0, 1, 0, 1]`,  | runtime = 0.042s recorded.             |        |
+|         |                        |                                   | and runtime > 0 ms.                    |                                        |        |
++---------+------------------------+-----------------------------------+----------------------------------------+----------------------------------------+--------+
+| TC-02   | UC2: QAOA Circuit      | 4-node graph adjacency matrix,    | Constructs valid `QuantumCircuit` with | 4-qubit parameterised QAOA circuit     | PASS   |
+|         | Construction           | layer depth $p = 2$               | 4 qubits, 2 $(\gamma, \beta)$ layers,  | generated with 4 variational params.   |        |
+|         | (`QiskitQAOASolver`)   |                                   | and matching Ising $ZZ$ terms.         |                                        |        |
++---------+------------------------+-----------------------------------+----------------------------------------+----------------------------------------+--------+
+| TC-03   | UC3: Timeout Fallback  | QAOA run with mocked IBM session  | Catches exception, dispatches to local | Exception caught; `AerSimulator`       | PASS   |
+|         | (`FallbackManager`)    | raising `TimeoutException` (>30s) | `AerSimulator`, sets provenance label  | completed run with `"Local Sim"`       |        |
+|         |                        |                                   | to `"Local Sim"`, logs fallback notice.| provenance and UI log notification.    |        |
++---------+------------------------+-----------------------------------+----------------------------------------+----------------------------------------+--------+
+| TC-04   | UC4: API Token         | Malformed/empty API token string  | Rejects token, flags authentication    | Validation returned `False`; raised    | PASS   |
+|         | Validation             | `""` or `"invalid_token_123"`     | error, prevents remote QPU dispatch,   | auth warning and triggered safe        |        |
+|         |                        |                                   | and prompts user / falls back safely.  | fallback path without crashing.        |        |
++---------+------------------------+-----------------------------------+----------------------------------------+----------------------------------------+--------+
+| TC-05   | UC5: Comparative       | Completed Classical result        | Computes Approximation Ratio = 0.96,   | Approximation ratio = 0.96 calculated; | PASS   |
+|         | Analytics Calculation  | (cut = 4.0) and Quantum result    | formats side-by-side runtime and       | dual partition and shot distribution   |        |
+|         |                        | (expected cut = 3.84)             | shot distribution dictionary.          | structures populated for rendering.    |        |
++---------+------------------------+-----------------------------------+----------------------------------------+----------------------------------------+--------+
+| TC-06   | UI Component & State   | Solver state transitions (`Idle`  | `status_bar.py` and `log_panel.py`     | Status badge and log entries updated   | PASS   |
+|         | Refactor Verification  | -> `Running` -> `Fallback` ->     | accurately update status badges and    | without widget attribute errors.       |        |
+|         | (`test_ui_refactor.py`)| `Completed`)                      | enable/disable `setup_panel.py` inputs.|                                        |        |
++---------+------------------------+-----------------------------------+----------------------------------------+----------------------------------------+--------+
+
+Bugs Uncovered and Fixed During Testing:
+1. Qiskit Little-Endian Bitstring Ordering Bug (Uncovered by TC-02 / TC-05):
+   During initial testing on asymmetric 5-node graphs, the quantum partition visualiser highlighted the wrong cut edges even when the QAOA sampler returned the highest-probability bitstring. Unit testing revealed that Qiskit orders measurement bitstrings in little-endian format ($q_{n-1}\dots q_1 q_0$), whereas `GraphWorkspace` indexed vertices in big-endian order ($0, 1, \dots, n-1$). We fixed this by reversing the sampled bitstring (`bitstring[::-1]`) before mapping qubit states to graph nodes.
+2. Unhandled Exception on Blank/Expired IBM Token (Uncovered by TC-04):
+   Initially, submitting a quantum job with an empty or revoked IBM API token raised an uncaught `QiskitAccountError` that terminated the execution thread before `FallbackManager` could intercept it. We updated the `try/except` block in `executeQuantumQAOA` to catch both authentication and initialization exceptions during Step 1 (`INITIALIZEIBMSESSION`), smoothly redirecting execution to the local `AerSimulator` with a clear log message.
+3. UI Control Locking After Fallback Completion (Uncovered by TC-06):
+   Component tests in `tests/test_ui_refactor.py` uncovered that when a run transitioned through the `FallbackRunning` state rather than completing directly on the QPU, the "Run" button in `setup_panel.py` remained disabled after completion. We fixed the state callback in `app.py` so both remote completion and fallback completion reset the workspace controls to the ready state.
+
+
+--------------------------------------------------------------------------------
+9.4 DEPLOYMENT & INSTALLATION
+--------------------------------------------------------------------------------
+
+[HOW TO WRITE THIS SECTION]
+1. Provide Clear, Reproducible Setup Steps:
+   - List prerequisites (Python 3.10+, Git, pip/venv, optional IBM Quantum API token).
+   - Provide exact terminal commands for cloning the repository, creating/activating
+     a virtual environment, installing dependencies (`requirements.txt`), and
+     launching the application (`python main.py`).
+2. Explain Both Operating Modes (Cloud vs. Local/Demo Mode):
+   - Emphasise that users (such as lecturers, markers, or students without an IBM
+     Quantum account) can immediately run the application out-of-the-box using the
+     built-in local Qiskit Aer simulator, or optionally input an IBM Quantum API
+     token in the setup panel to dispatch jobs to live IBM QPUs.
+
+[EXAMPLE FOR SECTION 9.4]
+ByteFlow is packaged as a self-contained Python application with automated dependency management, allowing students, researchers, and evaluators to deploy and run the platform locally in under five minutes.
+
+Prerequisites:
+- Operating System: Windows 10/11, macOS, or Linux (64-bit)
+- Python Runtime: Python 3.10 or higher (with `pip` and `venv`)
+- External Credentials (Optional): An IBM Quantum Platform API token for live QPU hardware execution. If omitted, ByteFlow automatically executes quantum runs via the local `Qiskit Aer` simulator.
+
+Step-by-Step Installation & Launch Instructions:
+1. Clone the Repository:
+   ```bash
+   git clone https://github.com/<group-repo>/byteflow.git
+   cd byteflow
+   ```
+2. Create and Activate a Virtual Environment:
+   - On Windows (PowerShell):
+     ```powershell
+     python -m venv .venv
+     .\.venv\Scripts\Activate.ps1
+     ```
+   - On macOS / Linux:
+     ```bash
+     python3 -m venv .venv
+     source .venv/bin/activate
+     ```
+3. Install Required Dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+   *(This installs `qiskit`, `qiskit-aer`, `qiskit-ibm-runtime`, `numpy`, `scipy`, `cvxpy`, `networkx`, `matplotlib`, and `pytest`.)*
+4. Launch the ByteFlow Application:
+   ```bash
+   python main.py
+   ```
+5. Running the Automated Test Suite (Optional Verification):
+   ```bash
+   pytest tests/
+   ```
+Once launched, the user selects a predefined Max-Cut graph in the Setup Panel, chooses the solver configuration (Classical SDP or Quantum QAOA with layer depth $p$), optionally enters an IBM Quantum API token, and clicks **Run** to view real-time execution logs and side-by-side comparative analytics.
+================================================================================
